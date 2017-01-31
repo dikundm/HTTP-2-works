@@ -35,7 +35,10 @@ int set_callbacks() {
 	return 0;
 }
 
+int get_URI(const char *) {
+
+}
 
 int main(int argc, char *argv[]) {
-	return 0;
+	return get_URI(argv[1]);
 }
