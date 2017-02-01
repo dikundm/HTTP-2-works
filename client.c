@@ -2,12 +2,17 @@
  * h2p based HTTP2 client. 
  */
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 #include <h2p/h2p.h>
 
-#define LOG_AND_RETURN(m) { printf("ERROR: %s\n", m); return 1; }
+#define LOG_AND_RETURN(m,v) { printf("ERROR: %s\n", m); return v; }
 #define LOG_AND_EXIT(m) { printf("FATAL ERROR: %s\n", m); exit(1); }
 
 typedef struct {
@@ -48,11 +53,29 @@ void h2_error_cb(h2p_context *context, h2p_error_type type, const char *msg) {
 
 }
 
-int set_callbacks() {
-	return 0;
+h2p_callbacks parser_callbacks = {
+  h2_frame_cb,
+  h2_headers_cb,
+  h2_data_started_cb,
+  h2_data_cb,
+  h2_data_finished_cb,
+  h2_error_cb
+};
+
+h2p_context *init_parser() {
+  int status;
+  h2p_context *parser;
+  h2p_callbacks *callbacks = &parser_callbacks;
+
+  status = h2p_init (callbacks, 1, &parser);
+  if (status != 0) {
+    LOG_AND_RETURN("Parser cannot be initialized.", NULL)
+  }
+
+	return parser;
 }
 
-void get_uri(const URI *uri) {
+void print_uri(const URI *uri) {
   if (uri == NULL) return;
 
 	printf ("host: %s\n", uri->host);
@@ -61,8 +84,51 @@ void get_uri(const URI *uri) {
 	printf ("port: %d\n", uri->port);
 }
 
+int connect_to(const char *host, uint16_t port) {
+  struct addrinfo hints;
+  int fd = -1;
+  int rv;
+  char service[NI_MAXSERV];
+  struct addrinfo *res, *rp;
+  snprintf(service, sizeof(service), "%u", port);
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  rv = getaddrinfo(host, service, &hints, &res);
+  if (rv != 0) {
+    LOG_AND_EXIT(gai_strerror(rv))
+  }
+  for (rp = res; rp; rp = rp->ai_next) {
+    fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (fd == -1) {
+      continue;
+    }
+    while ((rv = connect(fd, rp->ai_addr, rp->ai_addrlen)) == -1 &&
+           errno == EINTR)
+      ;
+    if (rv == 0) {
+      break;
+    }
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(res);
+  return fd;
+}
+
 int get_uri(const URI *uri) {
-  return 0;
+  int fd;
+  int status;
+
+  fd = connect_to(uri->host, uri->port);
+  if (fd < 0) {
+    LOG_AND_EXIT("Connection to host failed\n")
+  }
+
+  shutdown(fd, SHUT_WR);
+  close(fd);
+
+  return status;
 }
 
 int parse_uri(URI *res, const char *uri) {
