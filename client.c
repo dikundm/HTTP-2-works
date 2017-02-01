@@ -15,6 +15,20 @@
 #define LOG_AND_RETURN(m,v) { printf("ERROR: %s\n", m); return v; }
 #define LOG_AND_EXIT(m) { printf("FATAL ERROR: %s\n", m); exit(1); }
 
+enum { RECEIVE_BYTES = 4096 };
+
+#define MAKE_NV(NAME, VALUE)                                                   \
+  {                                                                            \
+    (uint8_t *)NAME, (uint8_t *)VALUE, sizeof(NAME) - 1, sizeof(VALUE) - 1,    \
+        NGHTTP2_NV_FLAG_NONE                                                   \
+  }
+
+#define MAKE_NV_CS(NAME, VALUE)                                                \
+  {                                                                            \
+    (uint8_t *)NAME, (uint8_t *)VALUE, sizeof(NAME) - 1, strlen(VALUE),        \
+        NGHTTP2_NV_FLAG_NONE                                                   \
+  }
+
 typedef struct {
   const char *host;
   const char *path;
@@ -62,6 +76,15 @@ h2p_callbacks parser_callbacks = {
   h2_error_cb
 };
 
+void print_uri(const URI *uri) {
+  if (uri == NULL) return;
+
+	printf ("host: %s\n", uri->host);
+	printf ("path: %s\n", uri->path);
+	printf ("hostport: %s\n", uri->hostport);
+	printf ("port: %d\n", uri->port);
+}
+
 h2p_context *init_parser() {
   int status;
   h2p_context *parser;
@@ -72,16 +95,7 @@ h2p_context *init_parser() {
     LOG_AND_RETURN("Parser cannot be initialized.", NULL)
   }
 
-	return parser;
-}
-
-void print_uri(const URI *uri) {
-  if (uri == NULL) return;
-
-	printf ("host: %s\n", uri->host);
-	printf ("path: %s\n", uri->path);
-	printf ("hostport: %s\n", uri->hostport);
-	printf ("port: %d\n", uri->port);
+  return parser;
 }
 
 int connect_to(const char *host, uint16_t port) {
@@ -117,13 +131,56 @@ int connect_to(const char *host, uint16_t port) {
 }
 
 int get_uri(const URI *uri) {
-  int fd;
   int status;
+  int fd;
+  size_t nbytes;
+  h2p_context *parser;
+  char *send_buffer;
+  char *recv_buffer;
+  size_t length;
+  nghttp2_settings_entry iv[1] = {
+    {NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, 100}
+  };
+  nghttp2_nv nva[] = {
+    MAKE_NV(":method", "GET"),
+    MAKE_NV_CS(":path", uri->path),
+    MAKE_NV(":scheme", "http"),
+    MAKE_NV_CS(":authority", uri->hostport),
+    MAKE_NV("accept", "*/*"),
+    MAKE_NV("user-agent", "nghttp2/" NGHTTP2_VERSION)
+  };
 
   fd = connect_to(uri->host, uri->port);
   if (fd < 0) {
-    LOG_AND_EXIT("Connection to host failed\n")
+    LOG_AND_EXIT("Connection to host failed.")
   }
+
+  parser = init_parser();
+  if (parser == NULL) {
+    LOG_AND_EXIT("Parser initialization failed.")
+  }
+
+  nbytes = send(fd, H2_MAGIC, 24, 0);
+  if (nbytes != 24) {
+    LOG_AND_EXIT("Send error.")
+  }
+
+  send_buffer = h2p_raw_settings (iv, 1, &length);
+  nbytes = send(fd, send_buffer, length, 0);
+
+  send_buffer = h2p_raw_headers (-1, nva, 6, &length);
+  nbytes = send(fd, send_buffer, length, 0);
+
+  recv_buffer = malloc(RECEIVE_BYTES);
+
+  while ((nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0)) > 0) {
+    for (int i = 0; i < nbytes; i++) {
+      printf("%c", recv_buffer[i]);
+    }
+    printf ("\nRBYTES: %ld\n", nbytes);
+  }
+
+  //printf("send:%ld/%ld.\n", nbytes, length);
 
   shutdown(fd, SHUT_WR);
   close(fd);
