@@ -6,6 +6,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <netinet/tcp.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -101,9 +103,12 @@ h2p_context *init_parser() {
 int connect_to(const char *host, uint16_t port) {
   struct addrinfo hints;
   int fd = -1;
+  int val = 1;
   int rv;
+  int flags;
   char service[NI_MAXSERV];
   struct addrinfo *res, *rp;
+
   snprintf(service, sizeof(service), "%u", port);
   memset(&hints, 0, sizeof(struct addrinfo));
   hints.ai_family = AF_UNSPEC;
@@ -114,6 +119,7 @@ int connect_to(const char *host, uint16_t port) {
   }
   for (rp = res; rp; rp = rp->ai_next) {
     fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    //socket(rp->ai_family, SOCK_STREAM | SOCK_NONBLOCK, rp->ai_protocol);
     if (fd == -1) {
       continue;
     }
@@ -126,6 +132,22 @@ int connect_to(const char *host, uint16_t port) {
     close(fd);
     fd = -1;
   }
+#if 0
+  while ((flags = fcntl(fd, F_GETFL, 0)) == -1 && errno == EINTR)
+    ;
+  if (flags == -1) {
+    LOG_AND_EXIT("fcntl F_GETFL failed.")
+  }
+  while ((rv = fcntl(fd, F_SETFL, flags | O_NONBLOCK)) == -1 && errno == EINTR)
+    ;
+  if (rv == -1) {
+    LOG_AND_EXIT("fcntl F_SETFL failed.")
+  }
+  rv = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, (socklen_t)sizeof(val));
+  if (rv == -1) {
+    LOG_AND_EXIT("setsockopt failed.")
+  }
+#endif
   freeaddrinfo(res);
   return fd;
 }
@@ -173,11 +195,12 @@ int get_uri(const URI *uri) {
 
   recv_buffer = malloc(RECEIVE_BYTES);
 
-  while ((nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0)) > 0) {
+  nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0);
+  while (nbytes > 0) {
     for (int i = 0; i < nbytes; i++) {
       printf("%c", recv_buffer[i]);
     }
-    printf ("\nRBYTES: %ld\n", nbytes);
+    nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0);
   }
 
   //printf("send:%ld/%ld.\n", nbytes, length);
