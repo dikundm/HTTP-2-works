@@ -43,30 +43,31 @@ typedef struct {
 
 void h2_frame_cb(h2p_context *connection, uint32_t stream_id,
                h2p_frame_type type, const h2p_frame *frame) {
-
+  printf("FRAME: id[%d], type[%d].\n", stream_id, type);
 }
 
 void h2_headers_cb(h2p_context *connection, uint32_t stream_id,
                  const nghttp2_headers *headers) {
-
+  printf("HEADERS: id[%d].\n", stream_id);
 }
 
 int h2_data_started_cb(h2p_context *connection, uint32_t stream_id) {
+  printf("DATA STARTED: id[%d].\n", stream_id);
 	return 0;
 }
 
 void h2_data_cb(h2p_context *connection, uint32_t stream_id,
               const h2p_frame_data *data) {
-
+  printf("DATA: id[%d].\n", stream_id);
 }
 
 void h2_data_finished_cb(h2p_context *connection, uint32_t stream_id,
               /*const h2p_frame *data,*/ uint32_t status) {
-
+  printf("DATA FINISHED: id[%d].\n", stream_id);
 }
 
 void h2_error_cb(h2p_context *context, h2p_error_type type, const char *msg) {
-
+  printf("ERROR: type[%d]: %s.\n", type, msg);
 }
 
 h2p_callbacks parser_callbacks = {
@@ -92,7 +93,7 @@ h2p_context *init_parser() {
   h2p_context *parser;
   h2p_callbacks *callbacks = &parser_callbacks;
 
-  status = h2p_init (callbacks, 1, &parser);
+  status = h2p_init (callbacks, 0, &parser);
   if (status != 0) {
     LOG_AND_RETURN("Parser cannot be initialized.", NULL)
   }
@@ -196,11 +197,15 @@ int get_uri(const URI *uri) {
   recv_buffer = malloc(RECEIVE_BYTES);
 
   nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0);
+
+  h2p_input(parser, 1, (uint8_t*)recv_buffer, nbytes);
+
   while (nbytes > 0) {
     for (int i = 0; i < nbytes; i++) {
       printf("%c", recv_buffer[i]);
     }
     nbytes = recv(fd, recv_buffer, RECEIVE_BYTES, 0);
+    h2p_input(parser, 1, (uint8_t*)recv_buffer, nbytes);
   }
 
   //printf("send:%ld/%ld.\n", nbytes, length);
